@@ -1,0 +1,6 @@
+app-backend/node_modules/
+app-client/node_modules/
+app-backend/dist/
+app-client/dist/
+app-backend/.env
+app-client/.env
