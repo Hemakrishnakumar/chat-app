@@ -6,6 +6,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { PresenceGateway } from './realtime/presence.gateway';
 import { RealtimeModule } from './realtime/realtime.module';
+import { ChatsModule } from './modules/chats/chat.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     AuthModule,
     UsersModule,
     RealtimeModule,
+    ChatsModule,
   ],
   providers: [PresenceGateway],
 })

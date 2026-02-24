@@ -41,6 +41,7 @@ export class PresenceGateway
 
       // attach user to socket
       socket.data.userId = userId;
+      await socket.join(`user:${userId}`);
 
       console.log(`🟢 User online: ${userId}`);
     } catch (err) {
