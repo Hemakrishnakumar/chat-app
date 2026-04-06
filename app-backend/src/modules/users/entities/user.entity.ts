@@ -1,30 +1,24 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ unique: true })
-  phoneNumber: string;
+  @Column({ type: 'varchar', length: 255, unique: true })
+  email: string;
 
-  @Column({ nullable: true })
-  name?: string;
+  @Column({ type: 'varchar', length: 255 })
+  name: string;
 
-  @Column({ nullable: true })
-  profilePhotoUrl?: string;
+  @Column({ type: 'varchar', length: 255 })
+  password: string;
 
-  @Column({ nullable: true })
-  about?: string;
+  @Column({ type: 'boolean', default: false })
+  emailVerified: boolean;
 
-  @Column({ type: 'timestamp', nullable: true })
-  lastSeen?: Date;
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  photo_url: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

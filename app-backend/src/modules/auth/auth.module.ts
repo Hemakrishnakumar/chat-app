@@ -1,34 +1,30 @@
-import { Module } from '@nestjs/common';
-import { AuthController } from './auth.controller';
-import { AuthService } from './auth.service';
-import { ConsoleOtpProvider } from './otp/console-otp.provider';
-import { SmsOtpProvider } from './otp/sms-otp.provider';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { UsersModule } from '../users/users.module';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { ConfigModule } from '@nestjs/config';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { SessionGuard } from './guards/session.guard';
+import { UsersModule } from '../users/users.module';
+import { RedisModule } from '../../infrastructure/redis/redis.module';
 
 @Module({
   imports: [
-    JwtModule.register({
-      secret: 'supersecret',
-      signOptions: { expiresIn: '15m' },
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('JWT_SECRET') || 'your-secret-key',
+        signOptions: { expiresIn: '15m' },
+      }),
     }),
-    UsersModule,
-    ConfigModule,
+    forwardRef(() => UsersModule),
+    RedisModule,
   ],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, SessionGuard],
   controllers: [AuthController],
-  providers: [
-    AuthService,
-    {
-      provide: 'OTP_PROVIDER',
-      useClass:
-        process.env.NODE_ENV === 'production'
-          ? SmsOtpProvider
-          : ConsoleOtpProvider,
-    },
-    JwtStrategy,
-  ],
-  exports: [JwtModule],
+  exports: [AuthService, JwtAuthGuard, SessionGuard],
 })
 export class AuthModule {}

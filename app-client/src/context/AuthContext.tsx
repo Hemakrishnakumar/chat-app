@@ -1,72 +1,109 @@
-import axios from "axios";
-import React, { createContext, useContext, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { BASE_URL } from "../config/constants";
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { authService } from '@/services';
+import type { AuthUser, LoginPayload, RegisterPayload, GoogleAuthPayload } from '@/types';
+import { AuthContext } from './authContext';
 
-interface User {
-  userId: string;
-  name?: string;
-  profilePhotoUrl?: string;
-}
 
-interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  logout: () => void;
-  setUser: Dispatch<SetStateAction<User | null>>;
-  setToken: Dispatch<SetStateAction<string | null>>;
-}
 
-const AuthContext = createContext<AuthContextType | null>(null);
+export function AuthProvider({ children }: { children: ReactNode }) {
+    const [user, setUser] = useState<AuthUser | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-export default function AuthProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [token, setToken] = useState<string | null>(
-    localStorage.getItem("accessToken")
-  );
-  const [user, setUser] = useState<User | null>(null);
+    console.log({ user })
 
-  useEffect(() => {
-    if (!token) return;
+    const clearError = useCallback(() => setError(null), []);
 
-    axios
-      .get(BASE_URL + "/users/me", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => {
-        setUser(res.data);
-      })
-      .catch((err) => {
-        if (err.response?.status === 401) {
-          localStorage.removeItem("accessToken");
-          setToken(null);
-          setUser(null);
+    const refetchUser = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await authService.getProfile();
+            setUser(data.data.user);
+        } catch {
+            setUser(null);
+        } finally {
+            setLoading(false);
         }
-      });
-  }, [token]);
+    }, []);
 
-  const logout = () => {
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
-    setToken(null);
-    setUser(null);
-  };
+    useEffect(() => {
+        refetchUser();
+    }, [refetchUser]);
 
-  
+    const login = useCallback(async (payload: LoginPayload) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await authService.login(payload);
+            setUser(data.data.user)
+           
+        } catch (err: unknown) {
+            const message = (err as { message?: string }).message ?? 'Login failed. Please try again.';
+            setError(message);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, token, logout, setUser, setToken }}>
-      {children}
-    </AuthContext.Provider>
-  );
+    const register = useCallback(async (payload: RegisterPayload) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await authService.register(payload);            
+        } catch (err: unknown) {
+            const message =
+                (err as { message?: string }).message ?? 'Registration failed. Please try again.';
+            setError(message);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const googleAuth = useCallback(async (payload: GoogleAuthPayload) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await authService.googleAuth(payload);
+            setUser(data.user);
+        } catch (err: unknown) {
+            const message =
+                (err as { message?: string }).message ?? 'Google sign-in failed. Please try again.';
+            setError(message);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const logout = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            await authService.logout();
+            await refetchUser();
+        } finally {
+            setLoading(false);
+        }
+    }, [refetchUser]);
+
+    return (
+        <AuthContext.Provider
+            value={{
+                user,
+                loading,
+                isAuthenticated: !!user,
+                error,
+                clearError,
+                login,
+                register,
+                googleAuth,
+                logout,
+                refetchUser,
+            }}
+        >
+            {children}
+        </AuthContext.Provider>
+    );
 }
-
-export const useAuthContext = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuthContext must be used inside AuthProvider");
-  }
-  return ctx;
-};

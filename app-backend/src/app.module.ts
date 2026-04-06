@@ -4,14 +4,18 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
-import { PresenceGateway } from './realtime/presence.gateway';
-import { RealtimeModule } from './realtime/realtime.module';
-import { ChatsModule } from './modules/chats/chat.module';
+import { BullModule } from '@nestjs/bullmq';
+import { ChatsModule } from './modules/chat/chat.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-
+    BullModule.forRoot({
+      connection: {
+        host: 'localhost',
+        port: 6379,
+      },
+    }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -28,9 +32,8 @@ import { ChatsModule } from './modules/chats/chat.module';
     RedisModule,
     AuthModule,
     UsersModule,
-    RealtimeModule,
-    ChatsModule,
+    ChatsModule
   ],
-  providers: [PresenceGateway],
+  providers: [],
 })
 export class AppModule {}

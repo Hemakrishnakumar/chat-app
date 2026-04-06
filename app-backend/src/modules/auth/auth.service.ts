@@ -1,46 +1,80 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 import Redis from 'ioredis';
-import type { OtpProvider } from './otp/otp.provider';
-import { JwtService } from '@nestjs/jwt/dist/jwt.service';
+import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
+import { LoginDto } from '../users/dto/login-user.dto';
+
+export interface SessionData {
+  userId: string;
+  email: string;
+  name: string;
+  createdAt: number;
+  photo_url: string | null;
+}
 
 @Injectable()
 export class AuthService {
   constructor(
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    @Inject('OTP_PROVIDER') private readonly otpProvider: OtpProvider,
     private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  async sendOtp(phone: string): Promise<void> {
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-
-    await this.redis.set(`otp:${phone}`, code, 'EX', 600);
-
-    await this.otpProvider.sendOtp(phone, code);
+  async register(createUserDto: CreateUserDto) {
+    await this.usersService.create(createUserDto);
   }
 
-  async verifyOtp(phone: string, code: string) {
-    //get the stored OTP from Redis and compare
-    const stored = await this.redis.get(`otp:${phone}`);
+  async login(loginDto: LoginDto): Promise<{ sessionId: string; user: any }> {
+    const { email, password } = loginDto;
 
-    if (!stored || stored !== code) {
-      throw new Error('Invalid OTP');
+    // Find user by email
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !(await bcrypt.compare(password, user.password)) ) {
+      throw new UnauthorizedException('Invalid email or password');
+    }    
+    
+    // Create session
+    const sessionId = uuidv4();
+    const sessionData: SessionData = {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      photo_url: user.photo_url,
+      createdAt: Date.now(),
+    };
+
+    // Store session in Redis with 1 day expiration (86400 seconds)
+    await this.redis.setex(
+      `session:${sessionId}`,
+      86400,
+      JSON.stringify(sessionData),
+    );
+
+    return {
+      sessionId,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        photo_url: user.photo_url,
+      },
+    };
+  }
+
+  async validateSession(sessionId: string): Promise<SessionData | null> {
+    const sessionData = await this.redis.get(`session:${sessionId}`);
+    if (!sessionData) {
+      return null;
     }
+    return JSON.parse(sessionData);
+  }
 
-    await this.redis.del(`otp:${phone}`);
+  async getUserById(userId: string) {
+    return await this.usersService.findById(userId);
+  }
 
-    let user = await this.usersService.findByPhone(phone);
-    if (!user) {
-      user = await this.usersService.create(phone);
-    }
-
-    const payload = { sub: user.id };
-
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-    return { accessToken, refreshToken, user };
+  async destroySession(sessionId: string): Promise<void> {
+    await this.redis.del(`session:${sessionId}`);
   }
 }
