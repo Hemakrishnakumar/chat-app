@@ -12,7 +12,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   type: 'direct' | 'group';
-  name: string;
+  name: string | null;
   avatarUrl: string | null;
   lastMessage: Message | null;
   unreadCount: number;
@@ -36,10 +36,10 @@ export const chatService = {
     return apiClient.get<GetChatsResponse>(url, callbacks);
   },
 
-  sendMessage(recipientId: string, content: string, callbacks?: RequestCallbacks<any>) {
+  sendMessage(participantIds: string[], content: string, type: string, callbacks?: RequestCallbacks<any>) {
     return apiClient.post<any>(
-      API_ENDPOINTS.CHATS.SEND_MESSAGE,
-      { recipientId, content },
+      API_ENDPOINTS.CHATS.CREATE_CONVERSATION,
+      { participantIds, content, type },
       callbacks,
     );
   },

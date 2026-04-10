@@ -10,6 +10,7 @@ import { ChatsController } from './chat.controller';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { ChatGateway } from './chat.gateway';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { ChatGateway } from './chat.gateway';
     AuthModule,
   ],
   controllers: [ChatsController],
-  providers: [ChatService, ChatGateway],
+  providers: [ChatService, ChatGateway, RedisService],
   exports: [ChatService],
 })
 export class ChatsModule {}

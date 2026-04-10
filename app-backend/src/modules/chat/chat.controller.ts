@@ -1,67 +1,77 @@
-import { Controller, Get, UseGuards, Req, Post, Body, Query, HttpCode, HttpStatus, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  UseGuards,
+  Req,
+  Post,
+  Body,
+  Query,
+  HttpCode,
+  HttpStatus,
+  Param,
+} from '@nestjs/common';
 import { ChatService } from './chat.service';
-import { UsersService } from '../users/users.service';
 import { GetChatsDto } from './dto/get-chats.dto';
+// import { GetMessagesDto } from './dto/get-messages.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+// import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { GetMessagesDto } from './dto/get-messages-dto';
+import { CreateConversationDto } from './dto/create-conversation.dto';
 
-@Controller('api/v1/chats')
+@Controller('api/v1/conversations')
 @UseGuards(SessionGuard)
 export class ChatsController {
-  constructor(
-    private readonly chatsService: ChatService,
-    private readonly usersService: UsersService,
-  ) {}
+  constructor(private readonly chatsService: ChatService) {}
 
-  @Get('/')
+  // 🔹 Conversation List
+  @Get()
   @HttpCode(HttpStatus.OK)
-  async getChats(@Req() req: any, @Query() query: GetChatsDto) {
+  async getConversations(@Req() req: any, @Query() query: GetChatsDto) {
     const userId = req.user?.userId;
 
-    if (!userId) {
-      throw new Error('User not authenticated');
-    }
-
-    return this.chatsService.getUserChats(userId, query.cursor, query.limit || 20);
+    return this.chatsService.getUserConversations(
+      userId,
+      query.cursor,
+      query.limit || 20,
+    );
   }
 
+  // 🔹 Messages (paginated)
   @Get(':conversationId/messages')
   @HttpCode(HttpStatus.OK)
-  async getMessages(@Param('conversationId') conversationId: string) {
-    return this.chatsService.getMessages(conversationId);
-  }
-
-  @Post('direct')
-  async createDirect(@Req() req: any, @Body('phone') phone: string) {
+  async getMessages(
+    @Req() req: any,
+    @Param('conversationId') conversationId: string,
+    @Query() query: GetMessagesDto,
+  ) {
     const userId = req.user?.userId;
 
-    if (!userId) {
-      throw new Error('User not authenticated');
-    }
-
-    const targetUser = await this.usersService.findByPhone(phone);
-    if (!targetUser) throw new Error('User not found');
-
-    const chatId = await this.chatsService.findOrCreateDirectChat(userId, targetUser.id);
-
-    return { chatId };
+    return this.chatsService.getMessages(
+      userId,
+      conversationId,
+      query.cursor,
+      query.limit || 20,
+    );
   }
+ 
+ 
 
-  @Post('send-message')
+  // 🔹 Create conversation (first message)
+  @Post()
   @HttpCode(HttpStatus.CREATED)
-  async sendMessage(@Req() req: any, @Body() dto: SendMessageDto) {
+  async createConversation(
+    @Req() req: any,
+    @Body() dto: CreateConversationDto,
+  ) {
     const senderId = req.user?.userId;
 
-    if (!senderId) {
-      throw new Error('User not authenticated');
-    }
-
-    const result = await this.chatsService.sendFirstMessage(senderId, dto.recipientId, dto.content);
-
-    return {
-      statusCode: HttpStatus.CREATED,
-      message: 'Message sent',
-      data: result,
-    };
+    return this.chatsService.createConversationWithMessage(
+      senderId,
+      dto.participantIds,
+      dto.content,
+      dto.name,
+      dto.type
+    );
   }
 }

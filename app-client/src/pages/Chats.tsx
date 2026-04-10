@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import { chatService, type Conversation } from '@/services/chat.service';
+import { useConversation } from '@/context/conversationContext';
+import type { Conversation } from '@/services/chat.service';
 import ChatWindow from '@/components/ChatWindow';
 
 interface DraftConversation extends Conversation {
@@ -10,14 +11,20 @@ interface DraftConversation extends Conversation {
 
 const Chats = () => {
   const location = useLocation();
-  const [conversations, setConversations] = useState<DraftConversation[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<DraftConversation | null>(null);
+  const {
+    conversations,
+    selectedConversation,
+    isLoading,
+    hasMore,
+    nextCursor,
+    fetchConversations,
+    setSelectedConversation,
+    addDraftConversation,
+  } = useConversation();
+
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
   const [isDragging, setIsDragging] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
   const draftProcessedRef = useRef(false);
@@ -25,71 +32,38 @@ const Chats = () => {
   // Fetch initial conversations
   useEffect(() => {
     fetchConversations();
-  }, []);
+  }, [fetchConversations]);
 
   // Handle draft user from search
   useEffect(() => {
-    // Try to get draft user from sessionStorage first
     const storedDraftUser = sessionStorage.getItem('draftUser');
     const state = location.state as { draftUser?: any } | null;
     const draftUser = storedDraftUser ? JSON.parse(storedDraftUser) : state?.draftUser;
-    
-    console.log('Draft user:', draftUser);
-    
+
     if (draftUser && !draftProcessedRef.current) {
       draftProcessedRef.current = true;
-      console.log('Creating draft conversation for:', draftUser);
-      
-      const draftConversation: DraftConversation = {
-        id: `draft_${draftUser.id}`,
-        type: 'direct',
-        name: draftUser.name,
-        avatarUrl: draftUser.photo_url,
-        lastMessage: null,
-        unreadCount: 0,
-        updatedAt: new Date().toISOString(),
-        isDraft: true,
-      };
-      
-      // Add draft to the beginning of conversations
-      setConversations((prev) => {
-        const filtered = prev.filter((c) => c.id !== draftConversation.id);
-        return [draftConversation, ...filtered];
-      });
-      
-      setSelectedConversation(draftConversation);
-      
-      // Clear sessionStorage after processing
+      addDraftConversation(draftUser);
       sessionStorage.removeItem('draftUser');
     }
-  }, [location.state]);
+  }, [location.state, addDraftConversation]);
 
-  const fetchConversations = useCallback(async (cursor?: string) => {
-    if (isLoading || !hasMore) return;
+  // Infinite scroll handler
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const element = e.currentTarget;
+      const isNearBottom =
+        element.scrollHeight - element.scrollTop - element.clientHeight < 100;
 
-    setIsLoading(true);
-    try {
-      const response = await chatService.getChats(cursor, 20);
-      
-      if (cursor) {
-        // Append to existing conversations
-        setConversations((prev) => [...prev, ...response.data]);
-      } else {
-        // Initial load
-        setConversations(response.data);
-        if (response.data.length > 0 && !selectedConversation) {
-          setSelectedConversation(response.data[0]);
-        }
+      if (isNearBottom && hasMore && !isLoading && nextCursor) {
+        fetchConversations(nextCursor);
       }
+    },
+    [hasMore, isLoading, nextCursor, fetchConversations],
+  );
 
-      setNextCursor(response.nextCursor);
-      setHasMore(!!response.nextCursor);
-    } catch (error) {
-      console.error('Failed to fetch conversations:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, hasMore, selectedConversation]);
+  const filteredConversations = conversations?.filter((c) =>
+    c.name.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
 
   const handleMouseDown = () => {
     setIsDragging(true);
@@ -122,41 +96,16 @@ const Chats = () => {
     };
   }, [isDragging]);
 
-  // Infinite scroll handler
-  const handleScroll = useCallback(
-    (e: React.UIEvent<HTMLDivElement>) => {
-      const element = e.currentTarget;
-      const isNearBottom =
-        element.scrollHeight - element.scrollTop - element.clientHeight < 100;
-
-      if (isNearBottom && hasMore && !isLoading && nextCursor) {
-        fetchConversations(nextCursor);
-      }
-    },
-    [hasMore, isLoading, nextCursor, fetchConversations],
-  );
-
-  const filteredConversations = conversations?.filter((c) =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-
-  const handleConversationUpdate = (updatedConversation: DraftConversation) => {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === selectedConversation?.id ? updatedConversation : c))
-    );
-    setSelectedConversation(updatedConversation);
-  };
-
   return (
-    <div ref={containerRef} className="flex h-full bg-white">
+    <div ref={containerRef} className="flex h-full bg-white flex-col md:flex-row">
       {/* Left Panel - Conversations List */}
       <div
         style={{ width: `${leftPanelWidth}px` }}
-        className="flex flex-col bg-white border-r border-gray-200 overflow-hidden"
+        className="w-full md:w-80 flex-col bg-white border-b md:border-b-0 md:border-r border-gray-200 overflow-hidden hidden md:flex"
       >
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Chats</h2>
+        <div className="p-3 md:p-4 border-b border-gray-200 flex-shrink-0">
+          <h2 className="text-lg md:text-xl font-bold text-gray-900 mb-3 md:mb-4">Chats</h2>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -201,20 +150,17 @@ const Chats = () => {
         </div>
       </div>
 
-      {/* Resizer */}
+      {/* Resizer - Hidden on mobile */}
       <div
         onMouseDown={handleMouseDown}
-        className={`w-1 bg-gray-200 hover:bg-blue-500 cursor-col-resize transition-colors ${
+        className={`hidden md:block w-1 bg-gray-200 hover:bg-blue-500 cursor-col-resize transition-colors ${
           isDragging ? 'bg-blue-500' : ''
         }`}
       />
 
       {/* Right Panel - Chat Window */}
       {selectedConversation ? (
-        <ChatWindow
-          conversation={selectedConversation}
-          onConversationUpdate={handleConversationUpdate}
-        />
+        <ChatWindow conversation={selectedConversation} />
       ) : (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">
@@ -240,12 +186,12 @@ const ConversationItem = ({
   return (
     <div
       onClick={onSelect}
-      className={`px-3 py-2 mx-2 my-1 rounded-lg cursor-pointer transition-colors ${
+      className={`px-2 md:px-3 py-2 mx-1 md:mx-2 my-1 rounded-lg cursor-pointer transition-colors ${
         isSelected ? 'bg-blue-100' : 'hover:bg-gray-100'
       }`}
     >
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 overflow-hidden">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="w-8 md:w-10 h-8 md:h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-semibold text-xs md:text-sm flex-shrink-0 overflow-hidden">
           {conversation.avatarUrl ? (
             <img
               src={conversation.avatarUrl}
@@ -257,22 +203,22 @@ const ConversationItem = ({
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h4 className="font-medium text-gray-900 truncate">{conversation.name}</h4>
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center gap-1 md:gap-2 min-w-0">
+              <h4 className="font-medium text-gray-900 truncate text-sm">{conversation.name}</h4>
               {conversation.isDraft && (
-                <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-700 rounded">Draft</span>
+                <span className="text-xs px-1.5 md:px-2 py-0.5 bg-gray-200 text-gray-700 rounded flex-shrink-0">Draft</span>
               )}
             </div>
             {conversation.unreadCount > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-blue-500 text-white text-xs rounded-full flex-shrink-0">
+              <span className="px-1.5 md:px-2 py-0.5 bg-blue-500 text-white text-xs rounded-full flex-shrink-0">
                 {conversation.unreadCount}
               </span>
             )}
           </div>
           {conversation.lastMessage && (
             <>
-              <p className="text-sm text-gray-600 truncate">{conversation.lastMessage.content}</p>
+              <p className="text-xs md:text-sm text-gray-600 truncate">{conversation.lastMessage.content}</p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {new Date(conversation.lastMessage.createdAt).toLocaleTimeString([], {
                   hour: '2-digit',

@@ -5,11 +5,13 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { UseGuards } from '@nestjs/common';
+import { OnModuleInit, UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { WsSessionGuard } from '../auth/guards/ws-session.guard';
-import { SessionData } from '../auth/auth.service';
+import { AuthService, SessionData } from '../auth/auth.service';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
+import { User } from '../users/entities/user.entity';
 
 interface AuthenticatedSocket extends Socket {
   user?: SessionData;
@@ -22,31 +24,96 @@ interface AuthenticatedSocket extends Socket {
     credentials: true,
   },
 })
+
 @UseGuards(WsSessionGuard)
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
   @WebSocketServer()
   server: Server;
 
   private userSockets = new Map<string, Set<string>>();
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService, 
+    private authService: AuthService,
+    private redisService: RedisService
+  ) {}
+
+  onModuleInit() {
+      this.redisService.subscribe('NEW_MESSAGE', (payload) => {
+      this.handleNewCoversationMessage(payload);
+    });
+  }
+
+  private handleNewCoversationMessage(payload: any) {
+    const { conversation, message,  users} = payload;
+    const msg = {
+      id: conversation.id,
+      type: conversation.type,
+      updatedAt: conversation.updatedAt,
+      lastMessage: message,
+      unreadCount: 1
+    }
+    users.forEach((user: User) => {
+    const sockets = this.userSockets.get(user.id);
+
+    if (!sockets) return;
+    const userName = conversation.type === 'direct' ? users.find((member: User) => member.id !== user.id)?.name: "";       
+
+    sockets.forEach((socketId) => {
+      this.server.to(socketId).emit('NEW_CONVERSATION', {
+        ...msg,
+        name: userName
+      });
+    });
+  });     
+  }
+
+  private extractSessionId(cookieHeader: string | undefined): string | null {
+    if (!cookieHeader) return null;
+
+    const cookies = cookieHeader.split(';').map((c) => c.trim());
+    const sessionCookie = cookies.find((c) => c.startsWith('sessionId='));
+
+    if (!sessionCookie) return null;
+
+    return sessionCookie.split('=')[1];
+  }
 
   async handleConnection(client: AuthenticatedSocket) {
-    const userId = client.user?.userId;
+  try {
+    const cookieHeader = client.handshake.headers.cookie;
 
-    if (!userId) {
+    const sessionId = this.extractSessionId(cookieHeader);
+
+    if (!sessionId) {
+      console.log('No sessionId found');
       client.disconnect();
       return;
     }
 
-    // Track user's socket connections
+    const sessionData = await this.authService.validateSession(sessionId);
+
+    if (!sessionData) {
+      console.log('Invalid session');
+      client.disconnect();
+      return;
+    }  
+
+    const userId = sessionData.userId;
+
+    
     if (!this.userSockets.has(userId)) {
       this.userSockets.set(userId, new Set());
     }
+
     this.userSockets.get(userId)!.add(client.id);
 
     console.log(`User ${userId} connected with socket ${client.id}`);
+  } catch (err) {
+    console.error('Connection error:', err);
+    client.disconnect();
   }
+}
 
   handleDisconnect(client: AuthenticatedSocket) {
     const userId = client.user?.userId;
@@ -146,6 +213,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userName: client.user?.name,
       isTyping: data.isTyping,
     });
+  }
+
+  @SubscribeMessage('mark_read')
+  async handleMarkRead(
+    client: AuthenticatedSocket,
+    data: { conversationId: string },
+  ) {
+    const userId = client.user?.userId;
+    if (!userId) return;
+
+    // Update user's joinedAt to mark as read
+    await this.chatService.updateMemberJoinedAt(userId, data.conversationId);
   }
 
   // Helper method to send message to specific user

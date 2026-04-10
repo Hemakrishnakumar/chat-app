@@ -22,9 +22,9 @@ export const API_ENDPOINTS = {
         SEARCH: '/users/search',
     },
     CHATS: {
-        LIST: '/chats',
-        CREATE_DIRECT: '/chats/direct',
-        SEND_MESSAGE: '/chats/send-message',
+        LIST: '/conversations',
+        CREATE_CONVERSATION: '/conversations',
+        SEND_MESSAGE: '/conversations/send-message',
     },
     AUDIT_LOGS: '/audit-logs',
     USER_DEVICES: (id: string) => `/users/${id}/devices`,

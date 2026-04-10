@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, MoreThan, Not, In, DataSource } from 'typeorm';
 import { Conversation, ChatType } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { Message, MessageType } from './entities/message.entity';
 import { MessageReceipt } from './entities/message-status.entity';
 import { User } from '../users/entities/user.entity';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
 
 export interface ChatResponse {
   id: string;
@@ -29,66 +30,114 @@ export class ChatService {
     @InjectRepository(Conversation) private chatRepo: Repository<Conversation>,
     @InjectRepository(ConversationMember) private memberRepo: Repository<ConversationMember>,
     @InjectRepository(Message) private messageRepo: Repository<Message>,
-    @InjectRepository(MessageReceipt)
-    private statusRepo: Repository<MessageReceipt>,
+    @InjectRepository(MessageReceipt) private receiptRepo: Repository<MessageReceipt>,
+    private redisService: RedisService,
+    private dataSource: DataSource,
     @InjectRepository(User) private userRepo: Repository<User>,
-  ) {}
+  ) { }
 
-  async getUserChats(userId: string, cursor?: string, limit: number = 20): Promise<{ data: ChatResponse[]; nextCursor: string | null }> {
-    // Get all conversations for the user
+  async getUserConversations(
+    userId: string,
+    cursor?: string,
+    limit: number = 20,
+  ): Promise<{ data: ChatResponse[]; nextCursor: string | null }> {
+
+    // Get conversations for user
     const query = this.chatRepo
-      .createQueryBuilder('conversation')
-      .innerJoin(
-        'conversation_members',
-        'cm',
-        'cm.conversation_id = conversation.id',
-      )
+      .createQueryBuilder('c')
+      .innerJoin('conversation_members', 'cm', 'cm.conversation_id = c.id')
       .where('cm.user_id = :userId', { userId })
-      .orderBy('conversation.createdAt', 'DESC');
+      .orderBy('c.createdAt', 'DESC')
+      .limit(limit + 1);
 
     if (cursor) {
-      query.andWhere('conversation.createdAt < :cursor', { cursor });
+      query.andWhere('c.createdAt < :cursor', { cursor });
     }
 
-    const conversations = await query.take(limit + 1).getMany();
-
+    const conversations = await query.getMany();
     const hasMore = conversations.length > limit;
     const chats = conversations.slice(0, limit);
+    const conversationIds = chats.map(c => c.id);
 
+    // Fetch all messages for these conversations
+    const messages = await this.messageRepo.find({
+      where: { conversationId: In(conversationIds), deletedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
+
+    const messagesMap = new Map<string, Message>();
+    messages.forEach(msg => {
+      if (!messagesMap.has(msg.conversationId)) {
+        messagesMap.set(msg.conversationId, msg);
+      }
+    });
+
+    // Fetch members
+    const members = await this.memberRepo.find({
+      where: { conversationId: In(conversationIds) },
+      relations: ['user'],
+    });
+
+    const membersMap = new Map<string, any[]>();
+    members.forEach(member => {
+      if (!membersMap.has(member.conversationId)) {
+        membersMap.set(member.conversationId, [member]);
+      } else {
+        const membersList = membersMap.get(member.conversationId);
+        if (membersList) {
+          membersList.push(member);
+        }
+      }
+    });
+
+    // Fetch user's join time for each conversation
+    const memberRecords = await this.memberRepo.find({
+      where: { userId, conversationId: In(conversationIds) },
+    });
+
+    const lastReadMap = new Map<string, Date | null>();
+    memberRecords.forEach(m => {
+      lastReadMap.set(m.conversationId, m.joinedAt || null);
+    });
+
+    // Build response
     const chatResponses: ChatResponse[] = await Promise.all(
       chats.map(async (conversation) => {
-        // Get last message
-        const lastMessage = await this.messageRepo.findOne({
-          where: { conversationId: conversation.id, deletedAt: IsNull() },
-          order: { createdAt: 'DESC' },
-        });
+        const lastMessage = messagesMap.get(conversation.id) || null;
 
-        // Get unread count
-        const unreadCount = lastMessage
-          ? await this.messageRepo.count({
-              where: {
-                conversationId: conversation.id,
-                createdAt: lastMessage.createdAt,
-              },
-            })
-          : 0;
-
-        // Get chat name and avatar
         let chatName = conversation.name;
         let avatarUrl: string | null = null;
 
         if (conversation.type === ChatType.DIRECT) {
-          // For direct chats, get the other user's name
-          const members = await this.memberRepo.find({
-            where: { conversationId: conversation.id },
-            relations: ['user'],
-          });
+          const membersList = membersMap.get(conversation.id) || [];
+          const other = membersList.find(m => m.userId !== userId);
 
-          const otherMember = members.find((m) => m.userId !== userId);
-          if (otherMember) {
-            chatName = otherMember.user.name;
-            avatarUrl = otherMember.user.photo_url;
+          if (other) {
+            chatName = other.user.name;
+            avatarUrl = other.user.photo_url;
           }
+        }
+
+        const lastReadAt = lastReadMap.get(conversation.id);
+        let unreadCount = 0;
+
+        if (lastReadAt) {
+          unreadCount = await this.messageRepo.count({
+            where: {
+              conversationId: conversation.id,
+              createdAt: MoreThan(lastReadAt),
+              senderId: Not(userId),
+              deletedAt: IsNull(),
+            },
+          });
+        } else {
+          unreadCount = await this.messageRepo.count({
+            where: {
+              conversationId: conversation.id,
+              senderId: Not(userId),
+              deletedAt: IsNull(),
+            },
+          });
         }
 
         return {
@@ -98,12 +147,12 @@ export class ChatService {
           avatarUrl,
           lastMessage: lastMessage
             ? {
-                id: lastMessage.id,
-                content: lastMessage.content,
-                senderId: lastMessage.senderId,
-                createdAt: lastMessage.createdAt,
-                type: lastMessage.type,
-              }
+              id: lastMessage.id,
+              content: lastMessage.content,
+              senderId: lastMessage.senderId,
+              createdAt: lastMessage.createdAt,
+              type: lastMessage.type,
+            }
             : null,
           unreadCount,
           updatedAt: lastMessage?.createdAt || conversation.createdAt,
@@ -111,7 +160,9 @@ export class ChatService {
       }),
     );
 
-    const nextCursor = hasMore ? chats[chats.length - 1].createdAt.toISOString() : null;
+    const nextCursor = hasMore
+      ? chatResponses[chatResponses.length - 1].updatedAt.toISOString()
+      : null;
 
     return {
       data: chatResponses,
@@ -119,40 +170,108 @@ export class ChatService {
     };
   }
 
-  async findOrCreateDirectChat(userA: string, userB: string) {
-    const existingChat = await this.chatRepo
-      .createQueryBuilder('chat')
-      .innerJoin(
-        'conversation_members',
-        'm1',
-        'm1.conversation_id = chat.id AND m1.user_id = :userA',
-        { userA },
-      )
-      .innerJoin(
-        'conversation_members',
-        'm2',
-        'm2.conversation_id = chat.id AND m2.user_id = :userB',
-        { userB },
-      )
-      .where('chat.type = :type', { type: ChatType.DIRECT })
-      .getOne();
+  async createConversationWithMessage(
+    senderId: string,
+    participantIds: string[],
+    content: string,
+    name?: string,
+    type: ChatType = ChatType.DIRECT
+  ) {
+    const result = await this.dataSource.transaction(async (manager) => {
 
-    if (existingChat) {
-      return existingChat.id;
-    }
+      const uniqueParticipantIds = Array.from(new Set(participantIds));
+      const allMembers = Array.from(new Set([senderId, ...uniqueParticipantIds]));
 
-    // create new direct chat
-    const chat = await this.chatRepo.save({
-      type: ChatType.DIRECT,
-      createdById: userA,
+      const users = await manager
+        .createQueryBuilder(User, 'user')
+        .where('user.id IN (:...ids)', { ids: allMembers })
+        .select(['user.id', 'user.name', 'user.photo_url'])
+        .getMany();
+
+      if (users.length !== allMembers.length) {
+        throw new Error('One or more users do not exist');
+      }
+
+      if (type === ChatType.DIRECT && participantIds.length !== 1) {
+        throw new Error('Direct chat must have exactly one participant');
+      }
+
+      if (type === ChatType.GROUP && allMembers.length < 3) {
+        throw new Error('Group chat must have at least 3 members');
+      }
+
+      
+      let conversation: Conversation | null = null;
+
+
+      if (type === ChatType.DIRECT) {
+        const otherUserId = participantIds[0];
+
+        const existing = await manager
+          .createQueryBuilder(Conversation, 'c')
+          .innerJoin(
+            ConversationMember,
+            'm1',
+            'm1.conversationId = c.id AND m1.userId = :senderId',
+            { senderId },
+          )
+          .innerJoin(
+            ConversationMember,
+            'm2',
+            'm2.conversationId = c.id AND m2.userId = :otherUserId',
+            { otherUserId },
+          )
+          .where('c.type = :type', { type: ChatType.DIRECT })
+          .getOne();
+
+        if (existing) {
+          conversation = existing;
+        }
+      }
+
+      if (!conversation) {
+        const newConversation = manager.create(Conversation, {
+          type,
+          name: type === ChatType.GROUP ? name : undefined,
+          createdById: senderId,
+        });
+
+        conversation = await manager.save(newConversation);
+        
+
+        const members = allMembers.map((userId) =>
+          manager.create(ConversationMember, {
+            conversationId: conversation?.id,
+            userId,
+          }),
+        );
+
+        await manager.save(members);
+      }
+
+      const message = manager.create(Message, {
+        conversationId: conversation?.id,
+        senderId,
+        content,
+        type: MessageType.TEXT,
+      });
+
+      const savedMessage = await manager.save(message);
+
+      await manager.update(Conversation, conversation.id, {
+        lastMessageId: savedMessage.id,
+      });
+
+      return {
+        conversation,
+        message: savedMessage,
+        users
+      };
     });
 
-    await this.memberRepo.save([
-      { conversationId: chat.id, userId: userA },
-      { conversationId: chat.id, userId: userB },
-    ]);
+    await this.redisService.publish('NEW_MESSAGE', result);
 
-    return chat.id;
+    return { conversation: result.conversation, message: result.message  };
   }
 
   async saveMessage(conversationId: string, senderId: string, content: string) {
@@ -174,28 +293,17 @@ export class ChatService {
     return message;
   }
 
-  async sendFirstMessage(senderId: string, recipientId: string, content: string) {
-    // Find or create direct conversation
-    const conversationId = await this.findOrCreateDirectChat(senderId, recipientId);
-
-    // Save the message
-    const message = await this.saveMessage(conversationId, senderId, content);
-
-    // Update conversation's lastMessageId
-    await this.chatRepo.update(conversationId, {
-      lastMessageId: message.id,
-    });
-
-    return {
-      conversationId,
-      message,
-    };
-  }
-
-  async getMessages(conversationId: string) {
+  async getMessages(userId: string, conversationId: string, cursor?: string, limit?: Number) {
     return this.messageRepo.find({
       where: { conversationId, deletedAt: IsNull() },
       order: { createdAt: 'ASC' },
     });
+  }
+
+  async updateMemberJoinedAt(userId: string, conversationId: string) {
+    await this.memberRepo.update(
+      { userId, conversationId },
+      { joinedAt: new Date() }
+    );
   }
 }

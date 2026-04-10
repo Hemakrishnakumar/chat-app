@@ -9,9 +9,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AuthUser | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    console.log({ user })
-
+    
     const clearError = useCallback(() => setError(null), []);
 
     const refetchUser = useCallback(async () => {

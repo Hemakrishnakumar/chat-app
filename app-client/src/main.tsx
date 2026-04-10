@@ -7,22 +7,28 @@ import { ErrorBoundaryClass } from './components/ErrorBoundary.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ThemeProvider } from './context/ThemeContext.tsx';
 import { Toaster } from './components/ui/sonner.tsx';
+import { SocketProvider } from './context/socketContext.tsx';
+import { ConversationProvider } from './context/conversationContext.tsx';
 
 
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string || "hvjfhv";
 
 createRoot(document.getElementById('root')!).render(
-    <StrictMode>
+    //<StrictMode>
         <ErrorBoundaryClass  >
             <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
                 <AuthProvider>
-                    <ThemeProvider >
-                        <App />
-                        <Toaster />
-                    </ThemeProvider>
+                    <SocketProvider>
+                        <ConversationProvider>
+                            <ThemeProvider >
+                                <App />
+                                <Toaster />
+                            </ThemeProvider>
+                        </ConversationProvider>
+                    </SocketProvider>                    
                 </AuthProvider>
             </GoogleOAuthProvider>
         </ErrorBoundaryClass>
-    </StrictMode>,
+    //</StrictMode>,
 );
