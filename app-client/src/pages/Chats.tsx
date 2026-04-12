@@ -161,7 +161,7 @@ const Chats = () => {
 
       {/* Right Panel - Chat Window */}
       {selectedConversation ? (
-        <ChatWindow conversation={selectedConversation} />
+        <ChatWindow />
       ) : (
         <div className="flex-1 flex items-center justify-center text-gray-400">
           <div className="text-center">

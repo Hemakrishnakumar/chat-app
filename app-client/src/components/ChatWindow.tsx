@@ -1,23 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, Check, Clock, AlertCircle } from 'lucide-react';
-import { chatService, type Conversation } from '@/services/chat.service';
+import { chatService, } from '@/services/chat.service';
 import { useAuth } from '@/context';
 import { useSocket } from '@/context/socketContext';
-import { useConversation } from '@/context/conversationContext';
-import { JOIN_CONVERSATION, LEAVE_CONVERSATION, MARK_READ, MESSAGE_RECEIVED, SEND_MESSAGE } from '@/types/socket.events';
+import { useConversation, type Message } from '@/context/conversationContext';
+import { MARK_READ, SEND_MESSAGE } from '@/types/socket.events';
 
-interface Message {
-  id: string;
-  content: string;
-  senderId: string;
-  createdAt: string;
-  type: string;
-  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
-}
 
-interface ChatWindowProps {
-  conversation: Conversation & { isDraft?: boolean };
-}
 
 const MessageStatusIcon = ({ status }: { status?: string }) => {
   switch (status) {
@@ -36,109 +25,29 @@ const MessageStatusIcon = ({ status }: { status?: string }) => {
   }
 };
 
-const ChatWindow = ({ conversation }: ChatWindowProps) => {
+const ChatWindow = () => {
   const { user } = useAuth();
-  const { addMessageToConversation } = useConversation();
-  const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const { messages, setMessages, isLoadingHistory, selectedConversation: conversation, markConversationAsRead} = useConversation();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socket = useSocket();
 
-  // Fetch chat history when conversation changes
-  useEffect(() => {
-    const fetchChatHistory = async () => {
-      // Reset messages immediately for draft conversations
-      if(conversation.isDraft) {
-        setMessages([]);
-        setIsLoadingHistory(false);
-        return;
-      }
-      
-      setIsLoadingHistory(true);
-      try {        
-        const history = await chatService.getMessages(conversation.id);
-        // Backend returns array directly
-        setMessages(Array.isArray(history) ? history : []);
-      } catch (error) {
-        console.error('Failed to fetch chat history:', error);
-        setMessages([]);
-      } finally {
-        setIsLoadingHistory(false);
-      }
-    };
-
-    fetchChatHistory();
-  }, [conversation.id, conversation.isDraft]);
+  if(!conversation) {
+    throw new Error('conversation should not be null');
+  }  
+  
 
 
-  // Setup socket listeners for real-time updates
-  useEffect(() => {
-    if (!socket || conversation.isDraft) return;
-    socket.emit(JOIN_CONVERSATION, { conversationId: conversation.id });
-    console.log("conversation joined", conversation.id)
-
-    return () => {
-      socket.emit(LEAVE_CONVERSATION, { conversationId: conversation.id });
-      console.log("left the conversation", conversation.id)
-    };
-  }, [socket, conversation.id]);
-
-
-  //Emit the read event to update the read status when opened a chat window
   useEffect(() => {
     if (!socket || conversation.isDraft) return;
 
-    socket.emit(MARK_READ, { conversationId: conversation.id });
-  }, [socket, conversation.id]);
-
-
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleMessage = (payload: any) => {
-      console.log('payload:', payload);
-      const message = payload.message;
-      if (message.conversationId !== conversation.id) {
-        console.log('Message is for different conversation, ignoring');
-        return;
+    socket.emit(MARK_READ, { conversationId: conversation.id }, (response: any)=> {
+      if(response.success) {
+        markConversationAsRead(conversation.id)
       }
-      
-      console.log('Processing message for current conversation');
-      setMessages((prev) => {
-        // Find if there's a temp message from the current user
-        const tempMessageIndex = prev.findIndex(m => 
-          m.id.startsWith('temp_') && m.senderId === String(user?.id)
-        );
-
-        if (tempMessageIndex !== -1) {
-          console.log('Found temp message, replacing with server message');
-          // Replace temp message with server message, preserving status if already set to 'sent'
-          const newMessages = [...prev];
-          const tempMessage = newMessages[tempMessageIndex];
-          newMessages[tempMessageIndex] = {
-            ...message,
-            status: tempMessage.status === 'sent' ? 'sent' : 'delivered',
-          };
-          return newMessages;
-        } else {
-          console.log('New message from another user');
-          // New message from another user
-          return [...prev, { ...message, status: 'delivered' }];
-        }
-      });
-      // Update conversation list with new message
-      addMessageToConversation(conversation.id, message);
-    };
-
-    socket.on(MESSAGE_RECEIVED, handleMessage);
-
-    return () => {
-      socket.off(MESSAGE_RECEIVED, handleMessage);
-    };
-  }, [socket, conversation.id, addMessageToConversation, user?.id]);
-
+    });
+  }, [socket, conversation.id]); 
 
 
 
@@ -185,7 +94,6 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
           )
         );
       } else {
-        // For existing conversations, use socket event
         if (socket && !conversation.isDraft) {
           socket.emit(SEND_MESSAGE, {
             conversationId: conversation.id,

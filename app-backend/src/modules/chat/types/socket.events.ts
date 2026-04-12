@@ -7,6 +7,7 @@ export const JOIN_CONVERSATION = 'JOIN_CONVERSATION';
 export const LEAVE_CONVERSATION = 'LEAVE_CONVERSATION'
 
 export const MARK_READ = 'MARK_READ'
+export const UPDATE_UNREAD_COUNT = 'UPDATE_UNREAD_COUNT';
 export const TYPING = 'TYPING';
 export const STOP_TYPING = 'STOP_TYPING';
 export const USER_ONLINE = 'USER_ONLINE';

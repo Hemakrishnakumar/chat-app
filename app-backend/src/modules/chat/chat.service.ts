@@ -290,14 +290,7 @@ export class ChatService {
       where: { conversationId, deletedAt: IsNull() },
       order: { createdAt: 'ASC' },
     });
-  }
-
-  async updateMemberJoinedAt(userId: string, conversationId: string) {
-    await this.memberRepo.update(
-      { userId, conversationId },
-      { joinedAt: new Date() }
-    );
-  }
+  }  
 
   async getConversationMembers(conversationId: string) {
     const members = await this.memberRepo.find({
@@ -334,5 +327,13 @@ export class ChatService {
         },
       });
     }
+  }
+
+  async markConversationAsRead(userId: string, conversationId: string) {
+    const conversation = await this.chatRepo.findOne({ where: { id: conversationId}, select: ['lastMessageId']})
+    await this.memberRepo.update(
+      { userId, conversationId },
+      { lastReadMessageId: conversation?.lastMessageId },
+    );
   }
 }

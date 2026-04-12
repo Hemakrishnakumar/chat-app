@@ -12,8 +12,8 @@ import { WsSessionGuard } from '../auth/guards/ws-session.guard';
 import { AuthService, SessionData } from '../auth/auth.service';
 import { RedisService } from 'src/infrastructure/redis/redis.service';
 import { User } from '../users/entities/user.entity';
-import { MESSAGE_RECEIVED, NEW_CONVERSATION } from './types/socket.events';
-import { ChatType } from './entities/conversation.entity';
+import { JOIN_CONVERSATION, LEAVE_CONVERSATION, MARK_READ, MESSAGE_RECEIVED, NEW_CONVERSATION, SEND_MESSAGE, UPDATE_CONVERSATION, UPDATE_UNREAD_COUNT } from './types/socket.events';
+import { ChatType, Conversation } from './entities/conversation.entity';
 
 interface AuthenticatedSocket extends Socket {
   user?: SessionData;
@@ -41,12 +41,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   ) { }
 
   onModuleInit() {
-    this.redisService.subscribe(NEW_CONVERSATION, (payload) => {
-      this.handleNewCoversationMessage(payload);
-    });
-    this.redisService.subscribe(MESSAGE_RECEIVED, (payload) => {
-      this.handleNewMessage(payload);
-    });
+    this.redisService.subscribe(NEW_CONVERSATION, (payload) => this.handleNewCoversationMessage(payload));
+    this.redisService.subscribe(MESSAGE_RECEIVED, (payload) => this.handleNewMessage(payload));
+    this.redisService.subscribe(UPDATE_UNREAD_COUNT, (payload) => this.handleUpdateUnreadCount(payload));
   }
 
   //REDIS SUBSCRIPTION HANDLERS
@@ -75,57 +72,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   async handleNewMessage(payload: any) {
-    const { conversationId, message, senderId } = payload;
-    const room = `conversation:${conversationId}`;
-    
-    // Broadcast message to all users in the conversation
-    this.server.to(room).emit(MESSAGE_RECEIVED, {
-      message: {
-        ...message,
-        status: 'delivered',
-      },
-    });
-
-    // Get all members of this conversation
+    const { conversationId, message } = payload;
+   
     const members = await this.chatService.getConversationMembers(conversationId);
 
-    // For each member (except sender), calculate and emit their unread count
     for (const member of members) {
-      if (member.userId !== senderId) {
-        // Check if user is currently in the conversation room
-        const sockets = this.userSockets.get(member.userId);
-        let isUserInRoom = false;
+      const sockets = this.userSockets.get(member.userId);
+      if (!sockets) continue;
+      
+      const unreadCount = await this.chatService.getUnreadCount(member.userId, conversationId);
 
-        if (sockets) {
-          // Check if any of the user's sockets are in the conversation room
-          const roomSockets = this.server.sockets.adapter.rooms.get(room);
-          if (roomSockets) {
-            for (const socketId of sockets) {
-              if (roomSockets.has(socketId)) {
-                isUserInRoom = true;
-                break;
-              }
-            }
-          }
-        }
-
-        // Only send unread count if user is NOT in the room
-        if (!isUserInRoom) {
-          const unreadCount = await this.chatService.getUnreadCount(member.userId, conversationId);
-          
-          // Emit unread count update to that user
-          if (sockets) {
-            sockets.forEach((socketId) => {
-              this.server.to(socketId).emit('unread_count_updated', {
-                conversationId,
-                unreadCount,
-              });
-            });
-          }
-        }
-      }
+      sockets.forEach((socketId) => {
+        this.server.to(socketId).emit(MESSAGE_RECEIVED, {
+          conversationId,
+          message,
+          unreadCount,
+        });
+      });
     }
   }
+
+  async handleUpdateUnreadCount(payload: any) {
+    const { userId, conversationId} = payload;
+    this.sendToUser(userId, UPDATE_UNREAD_COUNT, { userId, conversationId })    
+  }
+
 
   private extractSessionId(cookieHeader: string | undefined): string | null {
     if (!cookieHeader) return null;
@@ -138,10 +109,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     return sessionCookie.split('=')[1];
   }
 
+
   async handleConnection(client: AuthenticatedSocket) {
     try {
       const cookieHeader = client.handshake.headers.cookie;
-
       const sessionId = this.extractSessionId(cookieHeader);
 
       if (!sessionId) {
@@ -191,146 +162,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     }
   }
 
-  @SubscribeMessage('join_conversation')
-  async handleJoinConversation(
+
+  @SubscribeMessage(SEND_MESSAGE)
+  async handleSendMessage(
     client: AuthenticatedSocket,
-    data: { conversationId: string },
+    data: { conversationId: string; content: string },
   ) {
     const userId = client.user?.userId;
-    if (!userId) return;
 
-    const room = `conversation:${data.conversationId}`;
-    client.join(room);
-
-    // Notify others that user joined
-    this.server.to(room).emit('user_joined', {
-      userId,
-      userName: client.user?.name,
-      timestamp: new Date(),
-    });
-  }
-
-  @SubscribeMessage('leave_conversation')
-  async handleLeaveConversation(
-    client: AuthenticatedSocket,
-    data: { conversationId: string },
-  ) {
-    const userId = client.user?.userId;
-    if (!userId) return;
-
-    const room = `conversation:${data.conversationId}`;
-    client.leave(room);
-
-    // Notify others that user left
-    this.server.to(room).emit('user_left', {
-      userId,
-      timestamp: new Date(),
-    });
-  }
-
-  @SubscribeMessage('send_message')
-    async handleSendMessage(
-      client: AuthenticatedSocket,
-      data: { conversationId: string; content: string },
-      callback?: (response: any) => void,
-    ) {
-      const userId = client.user?.userId;
-      console.log('=== SEND_MESSAGE HANDLER ===');
-      console.log('userId:', userId);
-      console.log('client.user:', client.user);
-      console.log('data:', data);
-      console.log('callback exists:', !!callback);
-
-      if (!userId) {
-        console.log('ERROR: No userId found');
-        return;
-      }
-
-      try {
-        // Save message to database
-        const message = await this.chatService.saveMessage(
-          data.conversationId,
-          userId,
-          data.content,
-        );
-        console.log('Message saved to DB:', message);
-
-        const room = `conversation:${data.conversationId}`;
-        console.log('Broadcasting to room:', room);
-
-        // Broadcast message to all users in the conversation
-        this.server.to(room).emit('message_received', {
-          message: {
-            ...message,
-            status: 'delivered',
-          },
-        });
-        console.log('Emitted message_received to room');
-
-        // Send acknowledgment to sender
-        if (callback) {
-          console.log('Calling callback with success');
-          callback({ success: true, message });
-        } else {
-          console.log('WARNING: No callback provided');
-        }
-
-        // Get all members of this conversation
-        const members = await this.chatService.getConversationMembers(data.conversationId);
-        console.log('Conversation members:', members.length);
-
-        // For each member (except sender), calculate and emit their unread count
-        for (const member of members) {
-          if (member.userId !== userId) {
-            // Check if user is currently in the conversation room
-            const sockets = this.userSockets.get(member.userId);
-            let isUserInRoom = false;
-
-            if (sockets) {
-              // Check if any of the user's sockets are in the conversation room
-              const roomSockets = this.server.sockets.adapter.rooms.get(room);
-              if (roomSockets) {
-                for (const socketId of sockets) {
-                  if (roomSockets.has(socketId)) {
-                    isUserInRoom = true;
-                    break;
-                  }
-                }
-              }
-            }
-
-            // Only send unread count if user is NOT in the room
-            if (!isUserInRoom) {
-              const unreadCount = await this.chatService.getUnreadCount(member.userId, data.conversationId);
-              console.log(`Sending unread count ${unreadCount} to user ${member.userId}`);
-
-              // Emit unread count update to that user
-              if (sockets) {
-                sockets.forEach((socketId) => {
-                  this.server.to(socketId).emit('unread_count_updated', {
-                    conversationId: data.conversationId,
-                    unreadCount,
-                  });
-                });
-              }
-            }
-          }
-        }
-
-        // Publish to Redis for other server instances (if running multiple servers)
-        this.redisService.publish('MESSAGE_RECEIVED', {      
-          conversationId: data.conversationId,
-          message: {...message, status: 'delivered'},
-          senderId: userId
-        });
-        console.log('Published to Redis');
-      } catch (error) {
-        console.error('Error in handleSendMessage:', error);
-        if (callback) {
-          callback({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
-        }
-      }
+    if (!userId) {
+      return { success: false, error: 'No Authentication' }
     }
+
+    try {
+      const message = await this.chatService.saveMessage(
+        data.conversationId,
+        userId,
+        data.content,
+      );
+
+      // Publish to Redis for other server instances (if running multiple servers)
+      this.redisService.publish(MESSAGE_RECEIVED, {
+        conversationId: data.conversationId,
+        message: { ...message, status: 'sent' },
+      });
+      return { success: true, message }
+    } catch (error) {
+      console.error('Error in handleSendMessage:', error);
+      return { success: false, error: 'Failed to send message' }
+    }
+  }
 
   @SubscribeMessage('typing')
   async handleTyping(
@@ -349,16 +210,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     });
   }
 
-  @SubscribeMessage('mark_read')
+  @SubscribeMessage(MARK_READ)
   async handleMarkRead(
     client: AuthenticatedSocket,
     data: { conversationId: string },
   ) {
     const userId = client.user?.userId;
     if (!userId) return;
-
-    // Update user's joinedAt to mark as read
-    await this.chatService.updateMemberJoinedAt(userId, data.conversationId);
+    //Updated conversationMember lastMessagreRead to latest in the conversation
+    await this.chatService.markConversationAsRead(userId, data.conversationId);
+    this.redisService.publish(UPDATE_UNREAD_COUNT, { userId, conversationId: data.conversationId})
+    return { success: true }
   }
 
   // Helper method to send message to specific user
@@ -369,11 +231,5 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         this.server.to(socketId).emit(event, data);
       });
     }
-  }
-
-  // Helper method to send message to conversation
-  sendToConversation(conversationId: string, event: string, data: any) {
-    const room = `conversation:${conversationId}`;
-    this.server.to(room).emit(event, data);
-  }
+  } 
 }
