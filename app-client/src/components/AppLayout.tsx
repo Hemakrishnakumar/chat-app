@@ -1,12 +1,13 @@
 import {  useState, useRef, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  MessageCircle,
+  MessageSquare,
   Video,
   Calendar,
-  Users,
+  Users2,
   Settings,
   LogOut,
+  Search,
 } from 'lucide-react';
 import React from 'react';
 import { useAuth } from '@/context';
@@ -124,10 +125,7 @@ const SearchBar = () => {
   return (
     <div className="relative flex-1 w-full md:max-w-md" ref={searchContainerRef}>
       <div className="relative">
-        <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <path d="m21 21-4.35-4.35"></path>
-        </svg>
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
         <input
           type="text"
           placeholder="Search people..."
@@ -283,7 +281,7 @@ const AppLayout = () => {
   const navItems: NavItem[] = [
     {
       id: 'chats',
-      icon: <MessageCircle size={28} strokeWidth={1.5} />,
+      icon: <MessageSquare size={28} strokeWidth={1.5} />,
       label: 'Chats',
       path: '/',
     },
@@ -301,7 +299,7 @@ const AppLayout = () => {
     },
     {
       id: 'people',
-      icon: <Users size={28} strokeWidth={1.5} />,
+      icon: <Users2 size={28} strokeWidth={1.5} />,
       label: 'People',
       path: '/people',
     },

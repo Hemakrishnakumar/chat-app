@@ -4,9 +4,9 @@ import { Repository, IsNull, MoreThan, Not, In, DataSource } from 'typeorm';
 import { Conversation, ChatType } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { Message, MessageType } from './entities/message.entity';
-import { MessageReceipt } from './entities/message-status.entity';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from 'src/infrastructure/redis/redis.service';
+import { NEW_CONVERSATION } from './types/socket.events';
 
 export interface ChatResponse {
   id: string;
@@ -30,7 +30,6 @@ export class ChatService {
     @InjectRepository(Conversation) private chatRepo: Repository<Conversation>,
     @InjectRepository(ConversationMember) private memberRepo: Repository<ConversationMember>,
     @InjectRepository(Message) private messageRepo: Repository<Message>,
-    @InjectRepository(MessageReceipt) private receiptRepo: Repository<MessageReceipt>,
     private redisService: RedisService,
     private dataSource: DataSource,
     @InjectRepository(User) private userRepo: Repository<User>,
@@ -200,9 +199,7 @@ export class ChatService {
         throw new Error('Group chat must have at least 3 members');
       }
 
-      
       let conversation: Conversation | null = null;
-
 
       if (type === ChatType.DIRECT) {
         const otherUserId = participantIds[0];
@@ -237,7 +234,7 @@ export class ChatService {
         });
 
         conversation = await manager.save(newConversation);
-        
+
 
         const members = allMembers.map((userId) =>
           manager.create(ConversationMember, {
@@ -269,9 +266,9 @@ export class ChatService {
       };
     });
 
-    await this.redisService.publish('NEW_MESSAGE', result);
+    await this.redisService.publish(NEW_CONVERSATION, result);
 
-    return { conversation: result.conversation, message: result.message  };
+    return { conversation: result.conversation, message: result.message };
   }
 
   async saveMessage(conversationId: string, senderId: string, content: string) {
@@ -281,14 +278,9 @@ export class ChatService {
       content,
       type: MessageType.TEXT,
     });
-
-    const members = await this.memberRepo.find({ where: { conversationId } });
-
-    const statuses = members.map((m) => ({
-      messageId: message.id,
-      userId: m.userId,
-      deliveredAt: m.userId === senderId ? new Date() : null,
-    }));
+    await this.chatRepo.update(conversationId, {
+      lastMessageId: message.id,
+    });
 
     return message;
   }
@@ -305,5 +297,42 @@ export class ChatService {
       { userId, conversationId },
       { joinedAt: new Date() }
     );
+  }
+
+  async getConversationMembers(conversationId: string) {
+    const members = await this.memberRepo.find({
+      where: { conversationId },
+      relations: ['user']
+    });
+    return members;
+  }
+
+  async getUnreadCount(userId: string, conversationId: string): Promise<number> {
+    const member = await this.memberRepo.findOne({
+      where: { userId, conversationId },
+    });
+
+    if (!member) return 0;
+
+    const lastReadAt = member.joinedAt;
+
+    if (lastReadAt) {
+      return this.messageRepo.count({
+        where: {
+          conversationId,
+          createdAt: MoreThan(lastReadAt),
+          senderId: Not(userId),
+          deletedAt: IsNull(),
+        },
+      });
+    } else {
+      return this.messageRepo.count({
+        where: {
+          conversationId,
+          senderId: Not(userId),
+          deletedAt: IsNull(),
+        },
+      });
+    }
   }
 }

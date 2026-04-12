@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
-import type { Conversation } from '@/services/chat.service';
+import { CheckCircle2, Check, Clock, AlertCircle } from 'lucide-react';
+import { chatService, type Conversation } from '@/services/chat.service';
 import { useAuth } from '@/context';
 import { useSocket } from '@/context/socketContext';
 import { useConversation } from '@/context/conversationContext';
+import { JOIN_CONVERSATION, LEAVE_CONVERSATION, MARK_READ, MESSAGE_RECEIVED, SEND_MESSAGE } from '@/types/socket.events';
 
 interface Message {
   id: string;
@@ -25,9 +26,9 @@ const MessageStatusIcon = ({ status }: { status?: string }) => {
     case 'sent':
       return <Check size={14} className="opacity-70" />;
     case 'delivered':
-      return <CheckCheck size={14} className="opacity-70" />;
+      return <CheckCircle2 size={14} className="opacity-70" />;
     case 'read':
-      return <CheckCheck size={14} className="opacity-100" />;
+      return <CheckCircle2 size={14} className="opacity-100 text-blue-400" />;
     case 'failed':
       return <AlertCircle size={14} className="text-red-400" />;
     default:
@@ -37,7 +38,7 @@ const MessageStatusIcon = ({ status }: { status?: string }) => {
 
 const ChatWindow = ({ conversation }: ChatWindowProps) => {
   const { user } = useAuth();
-  const { updateConversation, addMessageToConversation } = useConversation();
+  const { addMessageToConversation } = useConversation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -56,8 +57,7 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
       }
       
       setIsLoadingHistory(true);
-      try {
-        const { chatService } = await import('@/services');
+      try {        
         const history = await chatService.getMessages(conversation.id);
         // Backend returns array directly
         setMessages(Array.isArray(history) ? history : []);
@@ -76,11 +76,12 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
   // Setup socket listeners for real-time updates
   useEffect(() => {
     if (!socket || conversation.isDraft) return;
-    socket.emit('join_conversation', { conversationId: conversation.id });
-    console.log("conversation joined")
+    socket.emit(JOIN_CONVERSATION, { conversationId: conversation.id });
+    console.log("conversation joined", conversation.id)
 
     return () => {
-      socket.emit('leave_conversation', { conversationId: conversation.id });
+      socket.emit(LEAVE_CONVERSATION, { conversationId: conversation.id });
+      console.log("left the conversation", conversation.id)
     };
   }, [socket, conversation.id]);
 
@@ -89,7 +90,7 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
   useEffect(() => {
     if (!socket || conversation.isDraft) return;
 
-    socket.emit('mark_read', { conversationId: conversation.id });
+    socket.emit(MARK_READ, { conversationId: conversation.id });
   }, [socket, conversation.id]);
 
 
@@ -97,24 +98,46 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
     if (!socket) return;
 
     const handleMessage = (payload: any) => {
-      console.log(payload)
-      if (payload.message?.conversationId !== conversation.id) return;
+      console.log('payload:', payload);
+      const message = payload.message;
+      if (message.conversationId !== conversation.id) {
+        console.log('Message is for different conversation, ignoring');
+        return;
+      }
       
-      const message = payload.message || payload;
+      console.log('Processing message for current conversation');
       setMessages((prev) => {
-        const newMessages = prev.filter(m => !m.id.startsWith('temp_'));
-        return [...newMessages, message];
+        // Find if there's a temp message from the current user
+        const tempMessageIndex = prev.findIndex(m => 
+          m.id.startsWith('temp_') && m.senderId === String(user?.id)
+        );
+
+        if (tempMessageIndex !== -1) {
+          console.log('Found temp message, replacing with server message');
+          // Replace temp message with server message, preserving status if already set to 'sent'
+          const newMessages = [...prev];
+          const tempMessage = newMessages[tempMessageIndex];
+          newMessages[tempMessageIndex] = {
+            ...message,
+            status: tempMessage.status === 'sent' ? 'sent' : 'delivered',
+          };
+          return newMessages;
+        } else {
+          console.log('New message from another user');
+          // New message from another user
+          return [...prev, { ...message, status: 'delivered' }];
+        }
       });
       // Update conversation list with new message
       addMessageToConversation(conversation.id, message);
     };
 
-    socket.on('message_received', handleMessage);
+    socket.on(MESSAGE_RECEIVED, handleMessage);
 
     return () => {
-      socket.off('message_received', handleMessage);
+      socket.off(MESSAGE_RECEIVED, handleMessage);
     };
-  }, [socket, conversation.id, addMessageToConversation]);
+  }, [socket, conversation.id, addMessageToConversation, user?.id]);
 
 
 
@@ -146,14 +169,9 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
     try {
       // If it's a draft conversation, use REST API for first message
       if (conversation.isDraft) {
-        const { chatService } = await import('@/services');
-
-        // Extract recipient ID from draft conversation
         const recipientId = conversation.id.replace('draft_', '');
-
         const response = await chatService.sendMessage([recipientId], messageContent, 'direct');
 
-        // Update message with server data (including server timestamp)
         setMessages((prev) =>
           prev.map((m) =>
             m.id === optimisticMessage.id
@@ -166,30 +184,38 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
               : m
           )
         );
-
-        // Update conversation if it was a draft
-        if (response.data?.conversationId ) {
-          const updatedConversation: Conversation & { isDraft?: boolean } = {
-            ...conversation,
-            id: response.data.conversationId,
-            isDraft: false,
-            lastMessage: {
-              id: response.data.message.id,
-              content: messageContent,
-              senderId: response.data.message.senderId,
-              createdAt: response.data.message.createdAt,
-              type: 'text',
-            },
-          };
-          //updateConversation(updatedConversation);
-        }
       } else {
         // For existing conversations, use socket event
         if (socket && !conversation.isDraft) {
-          socket.emit('send_message', {
+          socket.emit(SEND_MESSAGE, {
             conversationId: conversation.id,
             content: messageContent,
-          },);          
+          }, (response: any) => {
+            if (response?.success) {
+              // Update message status to sent
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === optimisticMessage.id
+                    ? {
+                      ...m,
+                      id: response.message.id,
+                      createdAt: response.message.createdAt,
+                      status: 'sent',
+                    }
+                    : m
+                )
+              );
+            } else {
+              // Update message status to failed
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === optimisticMessage.id
+                    ? { ...m, status: 'failed' }
+                    : m
+                )
+              );
+            }
+          });
         } else {
           throw new Error('Socket not connected');
         }
@@ -255,7 +281,8 @@ const ChatWindow = ({ conversation }: ChatWindowProps) => {
                 <p className="break-words">{message.content}</p>
                 <div className="flex items-center justify-end gap-1 mt-1">
                   <p className="text-xs opacity-70">
-                    {new Date(message.createdAt).toLocaleTimeString([], {
+                    {new Date(message.createdAt).toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
                       hour: '2-digit',
                       minute: '2-digit',
                     })}

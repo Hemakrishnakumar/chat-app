@@ -51,10 +51,10 @@ export class Message {
   fileUrl: string;
 
   // 🔹 Created time (ordering)
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({type:'timestamptz', name: 'created_at' })
   createdAt: Date;
 
   // 🔥 Soft delete (VERY IMPORTANT)
-  @Column({ name: 'deleted_at', nullable: true })
+  @Column({ type: 'timestamptz', name: 'deleted_at', nullable: true })
   deletedAt: Date;
 }

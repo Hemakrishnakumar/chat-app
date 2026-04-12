@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode, useEf
 import { chatService, type Conversation } from '@/services/chat.service';
 import { useSocket } from './socketContext';
 import { useAuthContext } from './authContext';
+import { NEW_CONVERSATION, UPDATE_CONVERSATION } from '@/types/socket.events';
 
 interface DraftConversation extends Conversation {
   isDraft?: boolean;
@@ -37,9 +38,7 @@ export const ConversationProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!socket) return;
 
-    //Register NEW_CONVERSATION event to listen to new conversations.
     const handleNewConversation = (payload: any) => {
-      console.log(selectedConversation, conversations)
       if (user?.id === payload.lastMessage.senderId && selectedConversation?.isDraft) {
         setConversations(prev =>
           prev.map(con => {
@@ -65,7 +64,7 @@ export const ConversationProvider = ({ children }: { children: ReactNode }) => {
               isDraft: false,
               id: payload.id,
               updatedAt: payload.updatedAt,
-              unreadCount: 1,
+              unreadCount: user?.id === payload.lastMessage.senderId ? 0: 1,
               lastMessage: payload.lastMessage,
             };
           }
@@ -73,16 +72,57 @@ export const ConversationProvider = ({ children }: { children: ReactNode }) => {
         });
       }
       else {
-        setConversations((prev: Conversation[]) => [payload, ...prev])
+        setConversations((prev: DraftConversation[]) => [{...payload, unreadCount: user?.id === payload.lastMessage.senderId ? 0: 1}, ...prev])
       }
     };
 
-    socket.on('NEW_CONVERSATION', handleNewConversation);
+    socket.on(NEW_CONVERSATION, handleNewConversation);
 
     return () => {
-      socket.off('NEW_CONVERSATION', handleNewConversation);
+      socket.off(NEW_CONVERSATION, handleNewConversation);
     };
-  }, [socket, user, selectedConversation])
+  }, [socket, user, selectedConversation]);
+
+  useEffect(()=>{
+    if(!socket) return;
+    socket.on(UPDATE_CONVERSATION, (payload: any) => {
+      console.log('new message', payload)
+      setConversations(prev => 
+        prev.map(conversation => {
+          if(conversation.id === payload.message.conversationId) {
+            return {
+              ...conversation,
+              lastMessage: payload,
+              updatedAt: payload.createdAt,
+              unreadCount: user?.id === payload.message.senderId ? 0 : conversation.unreadCount + 1
+            }
+          }
+          return conversation;
+        })
+      )
+    })
+
+    socket.on('unread_count_updated', (payload: any) => {
+      setConversations(prev =>
+        prev.map(conversation => {
+          if(conversation.id === payload.conversationId) {
+            return {
+              ...conversation,
+              unreadCount: payload.unreadCount
+            }
+          }
+          return conversation;
+        })
+      )
+    })
+
+    return () => {
+      socket.off(UPDATE_CONVERSATION)
+      socket.off('unread_count_updated')
+    }
+  }   
+  , [socket, user])
+ 
 
   const fetchConversations = useCallback(async (cursor?: string) => {
     if (isLoading || !hasMore) return;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, MessageSquare } from 'lucide-react';
 import { useConversation } from '@/context/conversationContext';
 import type { Conversation } from '@/services/chat.service';
 import ChatWindow from '@/components/ChatWindow';
@@ -62,7 +62,7 @@ const Chats = () => {
   );
 
   const filteredConversations = conversations?.filter((c) =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   const handleMouseDown = () => {
@@ -127,6 +127,7 @@ const Chats = () => {
           {filteredConversations?.length === 0 && !isLoading ? (
             <div className="flex items-center justify-center h-full text-gray-400">
               <div className="text-center">
+                <MessageSquare size={48} className="mx-auto mb-3 opacity-50" />
                 <p className="text-sm">No conversations yet</p>
                 <p className="text-xs mt-1">Start a new chat to begin messaging</p>
               </div>
@@ -195,17 +196,17 @@ const ConversationItem = ({
           {conversation.avatarUrl ? (
             <img
               src={conversation.avatarUrl}
-              alt={conversation.name}
+              alt={conversation.name || 'User'}
               className="w-full h-full object-cover"
             />
           ) : (
-            <span>{conversation.name.charAt(0).toUpperCase()}</span>
+            <span>{(conversation.name || 'U').charAt(0).toUpperCase()}</span>
           )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1 md:gap-2 min-w-0">
-              <h4 className="font-medium text-gray-900 truncate text-sm">{conversation.name}</h4>
+              <h4 className="font-medium text-gray-900 truncate text-sm">{conversation.name || 'Unknown'}</h4>
               {conversation.isDraft && (
                 <span className="text-xs px-1.5 md:px-2 py-0.5 bg-gray-200 text-gray-700 rounded flex-shrink-0">Draft</span>
               )}

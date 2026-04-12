@@ -53,6 +53,6 @@ export class ConversationMember {
   lastReadMessageId: string;
 
   // 🔹 Join time
-  @CreateDateColumn({ name: 'joined_at' })
+  @CreateDateColumn({type: 'timestamptz', name: 'joined_at' })
   joinedAt: Date;
 }

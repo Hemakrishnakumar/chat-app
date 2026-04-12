@@ -28,7 +28,7 @@ export class Conversation {
   })
   type: ChatType;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz'})
   createdAt: Date;
 
   @Column({ name: 'created_by' })

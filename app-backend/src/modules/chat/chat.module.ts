@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { Message } from './entities/message.entity';
-import { MessageReceipt } from './entities/message-status.entity';
 import { ChatService } from './chat.service';
 import { UsersModule } from '../users/users.module';
 import { ChatsController } from './chat.controller';
@@ -14,7 +13,7 @@ import { RedisService } from 'src/infrastructure/redis/redis.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Conversation, ConversationMember, Message, MessageReceipt, User]),
+    TypeOrmModule.forFeature([Conversation, ConversationMember, Message, User]),
     UsersModule,
     AuthModule,
   ],
