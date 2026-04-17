@@ -1,14 +1,14 @@
-import { Body, Controller, Post, ValidationPipe, HttpCode, HttpStatus, Res, Get, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Post, ValidationPipe, HttpCode, HttpStatus, Res, Get, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from '../users/dto/login-user.dto';
 
-@Controller('api/v1/auth')
+@Controller('api/v1')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register')
+  @Post('auth/register')
   async register(@Body(ValidationPipe) createUserDto: CreateUserDto) {
     await this.authService.register(createUserDto);
     return {
@@ -17,7 +17,7 @@ export class AuthController {
     };
   }
 
-  @Post('login')
+  @Post('auth/login')
   @HttpCode(HttpStatus.OK)
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
@@ -43,7 +43,7 @@ export class AuthController {
     });
   }
 
-  @Get('profile')
+  @Get('auth/profile')
   @HttpCode(HttpStatus.OK)
   async getProfile(@Req() req: Request) {
     const sessionId = req.cookies?.sessionId;
@@ -73,9 +73,9 @@ export class AuthController {
     };
   }
 
-  @Post('logout')
+  @Post('auth/logout')
   async logout(@Res() res: Response) {
     res.cookie('sessionId', null);
     return res.json({ message: 'Logged out successfully'});
-  }
+  }  
 }

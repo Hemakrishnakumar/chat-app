@@ -13,6 +13,7 @@ import React from 'react';
 import { useAuth } from '@/context';
 import { useSocket } from '@/context/socketContext';
 import { useConversation } from '@/context/conversationContext';
+import { apiClient } from '@/api';
 
 interface NavItem {
   id: string;
@@ -98,7 +99,7 @@ const SearchBar = () => {
     setSearchResults([]);
     setShowResults(false);
     // Add draft conversation using context
-    addDraftConversation(user);
+    addDraftConversation({ ids: [user.id], type: 'direct', name: user.name, photo_url: user.photo_url});
   };
 
   useEffect(() => {
@@ -256,8 +257,24 @@ const AppLayout = () => {
   const location = useLocation();
   const socket = useSocket();
 
-  console.log(socket);
 
+  async function registerUserToPushNotifications() {
+    const registration = await navigator.serviceWorker.ready;
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription) return;
+
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: "BCCKdWlm-U56vXr4hMT8DctwetauMi6z_GSSyr-LgkZtBuf-aIRaWIm6eW9EAAITJp3gc1Qj5r1huoIhz397B7I",
+    });
+    await apiClient.post('users/notifications/subscribe', subscription);
+  }
+  
+
+  useEffect(()=>{
+    registerUserToPushNotifications()
+  }, [])
 
   useEffect(() => {
       const initializeSocket = async () => {

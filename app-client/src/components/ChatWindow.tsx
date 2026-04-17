@@ -6,7 +6,11 @@ import { useSocket } from '@/context/socketContext';
 import { useConversation, type Message } from '@/context/conversationContext';
 import { MARK_READ, SEND_MESSAGE } from '@/types/socket.events';
 
-
+type ConversationMember = {
+  id: string,
+  name: string,
+  photo_url?: string | null  
+}
 
 const MessageStatusIcon = ({ status }: { status?: string }) => {
   switch (status) {
@@ -32,22 +36,31 @@ const ChatWindow = () => {
   const { messages, setMessages, isLoadingHistory, selectedConversation: conversation, markConversationAsRead} = useConversation();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socket = useSocket();
+  const [groupMembers, setGroupMembers] = useState<ConversationMember[]>([]);
 
   if(!conversation) {
     throw new Error('conversation should not be null');
-  }  
-  
+  }
+
+  useEffect(()=> {
+    if(conversation.isDraft || conversation.type !== 'group') return;
+    chatService.getConversationMembers(conversation.id).then((response) => {
+      if(response.success) {
+        setGroupMembers(response.data);
+      }
+    })
+  }, [])
 
 
   useEffect(() => {
-    if (!socket || conversation.isDraft) return;
+    if (!socket || conversation.isDraft || conversation.unreadCount > 0) return;
 
     socket.emit(MARK_READ, { conversationId: conversation.id }, (response: any)=> {
       if(response.success) {
         markConversationAsRead(conversation.id)
       }
     });
-  }, [socket, conversation.id]); 
+  }, [socket, conversation.id]);
 
 
 
@@ -78,8 +91,7 @@ const ChatWindow = () => {
     try {
       // If it's a draft conversation, use REST API for first message
       if (conversation.isDraft) {
-        const recipientId = conversation.id.replace('draft_', '');
-        const response = await chatService.sendMessage([recipientId], messageContent, 'direct');
+        const response = await chatService.sendMessage({participantIds: conversation.members, content: messageContent, type: conversation.type, name: conversation.name ?? undefined});
 
         setMessages((prev) =>
           prev.map((m) =>
@@ -165,7 +177,7 @@ const ChatWindow = () => {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 md:space-y-4">
+      <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-1">
         {isLoadingHistory ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
@@ -175,31 +187,89 @@ const ChatWindow = () => {
             <p className="text-sm">No messages yet</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${String(message.senderId) === String(user?.id) ? 'justify-end' : 'justify-start'}`}
-            >
+          messages.map((message, index) => {
+            const isCurrentUser = String(message.senderId) === String(user?.id);
+            const senderMember = groupMembers.find(m => m.id === message.senderId);
+            const isGroupChat = conversation.type === 'group';
+
+            // Check if this is the first message from this sender or if the previous message was from a different sender
+            const previousMessage = index > 0 ? messages[index - 1] : null;
+            const isFirstInGroup = !previousMessage || previousMessage.senderId !== message.senderId;
+
+            // Check if the next message is from the same sender
+            const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+            const isLastInGroup = !nextMessage || nextMessage.senderId !== message.senderId;
+
+            return (
               <div
-                className={`max-w-xs md:max-w-md px-3 md:px-4 py-2 rounded-lg text-sm md:text-base ${String(message.senderId) === String(user?.id)
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 text-gray-900'
-                  }`}
+                key={message.id}
+                className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
               >
-                <p className="break-words">{message.content}</p>
-                <div className="flex items-center justify-end gap-1 mt-1">
-                  <p className="text-xs opacity-70">
-                    {new Date(message.createdAt).toLocaleTimeString('en-IN', {
-                      timeZone: 'Asia/Kolkata',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </p>
-                  {String(message.senderId) === String(user?.id) && <MessageStatusIcon status={message.status} />}
+                <div className={`flex flex-col gap-0.5 w-full max-w-xs md:max-w-md`}>
+                  {/* Avatar and Message Container */}
+                  <div className={`flex gap-2 md:gap-3 items-center ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {/* Avatar Container - Always reserve space for alignment */}
+                    {isGroupChat && !isCurrentUser && (
+                      <div className="w-8 h-8 flex-shrink-0">
+                        {isFirstInGroup && (
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-semibold text-xs overflow-hidden">
+                            {senderMember?.photo_url ? (
+                              <img
+                                src={senderMember.photo_url}
+                                alt={senderMember.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span>{senderMember?.name?.charAt(0).toUpperCase() || '?'}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Message Content */}
+                    <div className="flex flex-col gap-1">
+                      {/* Sender Name - Only show for group chats, non-current user messages, and first message in group */}
+                      {isGroupChat && !isCurrentUser && isFirstInGroup && (
+                        <p className="text-xs font-medium text-gray-600 px-3">
+                          {senderMember?.name || 'Unknown'}
+                        </p>
+                      )}
+
+                      {/* Message Bubble */}
+                      <div
+                        className={`px-3 md:px-4 py-2 rounded-lg text-sm md:text-base w-fit ${
+                          isCurrentUser
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-100 text-gray-900'
+                        }`}
+                      >
+                        <p className="break-words">{message.content}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Timestamp - Only show for last message in group */}
+                  {isLastInGroup && (
+                    <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} ${isGroupChat && !isCurrentUser ? 'pl-10' : ''}`}>
+                      <p className="text-xs text-gray-500">
+                        {new Date(message.createdAt).toLocaleTimeString('en-IN', {
+                          timeZone: 'Asia/Kolkata',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                        {isCurrentUser && message.status && (
+                          <span className="ml-1">
+                            <MessageStatusIcon status={message.status} />
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

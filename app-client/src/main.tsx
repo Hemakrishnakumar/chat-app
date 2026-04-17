@@ -14,6 +14,11 @@ import { ConversationProvider } from './context/conversationContext.tsx';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string || "hvjfhv";
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(() => console.log('Service Worker Registered'));
+}
+
 createRoot(document.getElementById('root')!).render(
     //<StrictMode>
         <ErrorBoundaryClass  >

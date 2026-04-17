@@ -74,4 +74,9 @@ export class ChatsController {
       dto.type
     );
   }
+
+  @Get('/:id/members')
+  async getMembers(@Param('id') id: string){
+    return this.chatsService.getMembers(id);
+  }
 }

@@ -40,4 +40,7 @@ export class Conversation {
 
   @Column({ name: 'last_message_id', nullable: true })
   lastMessageId: string;
+
+  @Column({ type: 'timestamptz', nullable: true})
+  lastMessageAt: Date;
 }

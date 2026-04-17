@@ -12,6 +12,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   type: 'direct' | 'group';
+  members: string[];
   name: string | null;
   avatarUrl: string | null;
   lastMessage: Message | null;
@@ -22,6 +23,13 @@ export interface Conversation {
 export interface GetChatsResponse {
   data: Conversation[];
   nextCursor: string | null;
+}
+
+interface CreateConversationPayload  {
+  participantIds: string[],
+  name?: string | undefined,
+  content: string,
+  type: 'direct' | 'group'
 }
 
 export const chatService = {
@@ -36,12 +44,16 @@ export const chatService = {
     return apiClient.get<GetChatsResponse>(url, callbacks);
   },
 
-  sendMessage(participantIds: string[], content: string, type: string, callbacks?: RequestCallbacks<any>) {
+  sendMessage( payload: CreateConversationPayload, callbacks?: RequestCallbacks<any>) {
     return apiClient.post<any>(
       API_ENDPOINTS.CHATS.CREATE_CONVERSATION,
-      { participantIds, content, type },
+      payload,
       callbacks,
     );
+  },
+
+  getConversationMembers(id: string) {
+    return apiClient.get<any>(API_ENDPOINTS.CHATS.MEMBERS(id))
   },
 
   getMessages(conversationId: string, callbacks?: RequestCallbacks<Message[]>) {

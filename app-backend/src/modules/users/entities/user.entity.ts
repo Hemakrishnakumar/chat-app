@@ -25,4 +25,7 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ type: 'jsonb', nullable: true })
+  subscription: any;
 }

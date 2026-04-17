@@ -76,5 +76,5 @@ export class AuthService {
 
   async destroySession(sessionId: string): Promise<void> {
     await this.redis.del(`session:${sessionId}`);
-  }
+  }  
 }

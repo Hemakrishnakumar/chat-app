@@ -25,6 +25,7 @@ export const API_ENDPOINTS = {
         LIST: '/conversations',
         CREATE_CONVERSATION: '/conversations',
         SEND_MESSAGE: '/conversations/send-message',
+        MEMBERS: (id: string) => `/conversations/${id}/members`
     },
     AUDIT_LOGS: '/audit-logs',
     USER_DEVICES: (id: string) => `/users/${id}/devices`,

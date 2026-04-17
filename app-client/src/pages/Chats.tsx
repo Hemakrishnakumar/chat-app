@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, MessageSquare } from 'lucide-react';
+import { Search, MessageSquare, Plus } from 'lucide-react';
 import { useConversation } from '@/context/conversationContext';
 import type { Conversation } from '@/services/chat.service';
 import ChatWindow from '@/components/ChatWindow';
+import GroupCreationWindow from '@/components/GroupCreationWindow';
 
 interface DraftConversation extends Conversation {
   isDraft?: boolean;
@@ -25,6 +26,7 @@ const Chats = () => {
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
   const [isDragging, setIsDragging] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
   const draftProcessedRef = useRef(false);
@@ -105,7 +107,16 @@ const Chats = () => {
       >
         {/* Header */}
         <div className="p-3 md:p-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-lg md:text-xl font-bold text-gray-900 mb-3 md:mb-4">Chats</h2>
+          <div className="flex items-center justify-between mb-3 md:mb-4">
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">Chats</h2>
+            <button
+              onClick={() => setIsCreatingGroup(true)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Create group"
+            >
+              <Plus size={20} className="text-gray-600" />
+            </button>
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -159,8 +170,10 @@ const Chats = () => {
         }`}
       />
 
-      {/* Right Panel - Chat Window */}
-      {selectedConversation ? (
+      {/* Right Panel - Chat Window or Group Creation */}
+      {isCreatingGroup ? (
+        <GroupCreationWindow onClose={() => setIsCreatingGroup(false)} />
+      ) : selectedConversation ? (
         <ChatWindow />
       ) : (
         <div className="flex-1 flex items-center justify-center text-gray-400">

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, HttpCode, HttpStatus, Post, ValidationPipe, Body, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { SessionGuard } from '../auth/guards/session.guard';
 
@@ -39,5 +39,13 @@ export class UsersController {
       message: 'All users',
       data: users,
     };
+  }
+
+  @Post('notifications/subscribe')
+  @UseGuards(SessionGuard)
+  async storeUserSubscription(@Body(ValidationPipe) subscriptionDto: any, @Req() req: any
+  ) {
+    this.usersService.storeSubscription(req.user.userId, subscriptionDto);
+    return { message: 'Subscription stored successfully' };
   }
 }

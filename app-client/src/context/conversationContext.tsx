@@ -80,23 +80,35 @@ export const ConversationProvider = ({ children }: { children: ReactNode }) => {
       if (!socket) return;
   
       const handleMessage = (payload: any) => {
+        if (document.hidden && Notification.permission === "granted") {
+            new Notification("New Message", {
+              body: `You recieved a message`,
+              icon: "/logo.png",
+            });
+          }
         const message = payload.message;
         //update the conversations
         setConversations(prev => {
-          return prev.map(conversation => {
+          let conv;
+          const updated = prev.filter(conversation => {            
             if(conversation.id === payload.message.conversationId) {
-              return {
+              conv = {
                 ...conversation,
                 lastMessage: payload.message,
                 updatedAt: payload.message.createdAt,
                 unreadCount: user?.id === payload.message.senderId || message.conversationId === selectedConversation?.id ? 0 :  conversation.unreadCount + 1
               }
+              return false;
             }
-            return conversation;
+            return true;
           })
+          if(!conv) return prev;
+          return [conv, ...updated]
         })
         //check if the conversation chatwindow is opened
-        if (message.conversationId !== selectedConversation?.id) return;      
+        if (message.conversationId !== selectedConversation?.id) {          
+          return;
+        };      
         
         setMessages((prev: Message[]): Message[] => {
           if(message.senderId === user?.id) {
@@ -213,12 +225,13 @@ export const ConversationProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isLoading, hasMore, selectedConversation]);
 
-  const addDraftConversation = useCallback((user: any) => {
+  const addDraftConversation = useCallback((conversation: any) => {
     const draftConversation: DraftConversation = {
-      id: `draft_${user.id}`,
-      type: 'direct',
-      name: user.name,
-      avatarUrl: user.photo_url,
+      id: `draft`,
+      type: conversation.type,
+      members: conversation.ids,
+      name: conversation.name,
+      avatarUrl: conversation.photo_url,
       lastMessage: null,
       unreadCount: 0,
       updatedAt: new Date().toISOString(),

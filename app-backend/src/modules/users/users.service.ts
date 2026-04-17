@@ -90,4 +90,8 @@ export class UsersService {
     console.log('All users:', users);
     return users;
   }
+
+  async storeSubscription(userId: string, subscription: any) {
+    await this.userRepository.update({ id: userId }, { subscription });
+  }
 }

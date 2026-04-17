@@ -46,11 +46,11 @@ export class ChatService {
       .createQueryBuilder('c')
       .innerJoin('conversation_members', 'cm', 'cm.conversation_id = c.id')
       .where('cm.user_id = :userId', { userId })
-      .orderBy('c.createdAt', 'DESC')
+      .orderBy('c.lastMessageAt', 'DESC')
       .limit(limit + 1);
 
     if (cursor) {
-      query.andWhere('c.createdAt < :cursor', { cursor });
+      query.andWhere('c.lastMessageAt < :cursor', { cursor });
     }
 
     const conversations = await query.getMany();
@@ -154,7 +154,7 @@ export class ChatService {
             }
             : null,
           unreadCount,
-          updatedAt: lastMessage?.createdAt || conversation.createdAt,
+          updatedAt: lastMessage?.createdAt || conversation.lastMessageAt,
         };
       }),
     );
@@ -257,6 +257,7 @@ export class ChatService {
 
       await manager.update(Conversation, conversation.id, {
         lastMessageId: savedMessage.id,
+        lastMessageAt: savedMessage.createdAt
       });
 
       return {
@@ -280,6 +281,7 @@ export class ChatService {
     });
     await this.chatRepo.update(conversationId, {
       lastMessageId: message.id,
+      lastMessageAt: message.createdAt
     });
 
     return message;
@@ -293,11 +295,22 @@ export class ChatService {
   }  
 
   async getConversationMembers(conversationId: string) {
-    const members = await this.memberRepo.find({
+    const members: ConversationMember[] | User[] = await this.memberRepo.find({
       where: { conversationId },
-      relations: ['user']
-    });
+      relations: ['user']      
+    });    
     return members;
+  }
+
+  async getMembers(conversationId: string) {
+    let members: any =await this.getConversationMembers(conversationId);
+    members = (await members).map
+      ((m: any) => ({
+        id: m.user.id,
+        name: m.user.name,
+        photo_url: m.user.photo_url
+      }))
+    return {success: true, data: members};
   }
 
   async getUnreadCount(userId: string, conversationId: string): Promise<number> {
@@ -335,5 +348,9 @@ export class ChatService {
       { userId, conversationId },
       { lastReadMessageId: conversation?.lastMessageId },
     );
+  }
+
+  async getPushSubscription(userId: string) {
+    return await this.userRepo.findOne({where: {id: userId}, select: ['subscription']});
   }
 }

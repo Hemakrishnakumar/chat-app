@@ -12,8 +12,9 @@ import { WsSessionGuard } from '../auth/guards/ws-session.guard';
 import { AuthService, SessionData } from '../auth/auth.service';
 import { RedisService } from 'src/infrastructure/redis/redis.service';
 import { User } from '../users/entities/user.entity';
-import { JOIN_CONVERSATION, LEAVE_CONVERSATION, MARK_READ, MESSAGE_RECEIVED, NEW_CONVERSATION, SEND_MESSAGE, UPDATE_CONVERSATION, UPDATE_UNREAD_COUNT } from './types/socket.events';
-import { ChatType, Conversation } from './entities/conversation.entity';
+import {  MARK_READ, MESSAGE_RECEIVED, NEW_CONVERSATION, SEND_MESSAGE, UPDATE_UNREAD_COUNT } from './types/socket.events';
+import { ChatType } from './entities/conversation.entity';
+import * as webpush from 'web-push';
 
 interface AuthenticatedSocket extends Socket {
   user?: SessionData;
@@ -37,8 +38,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   constructor(
     private readonly chatService: ChatService,
     private authService: AuthService,
-    private redisService: RedisService
-  ) { }
+    private redisService: RedisService,
+    ) { }
 
   onModuleInit() {
     this.redisService.subscribe(NEW_CONVERSATION, (payload) => this.handleNewCoversationMessage(payload));
@@ -89,6 +90,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           unreadCount,
         });
       });
+      const user = await this.chatService.getPushSubscription(member.userId);
+      await webpush.sendNotification(
+        user?.subscription,
+          JSON.stringify({
+            title: 'New Message',
+            body: 'Krishna sent you a message',
+          }),
+);
     }
   }
 
